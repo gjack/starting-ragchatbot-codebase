@@ -5,7 +5,7 @@ const API_URL = '/api';
 let currentSessionId = null;
 
 // DOM elements
-let chatMessages, chatInput, sendButton, totalCourses, courseTitles, newChatBtn;
+let chatMessages, chatInput, sendButton, totalCourses, courseTitles, newChatBtn, themeToggle;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -16,7 +16,13 @@ document.addEventListener('DOMContentLoaded', () => {
     totalCourses = document.getElementById('totalCourses');
     courseTitles = document.getElementById('courseTitles');
     newChatBtn = document.getElementById('newChatBtn');
-    
+    themeToggle = document.getElementById('themeToggle');
+
+    // Restore saved theme preference
+    if (localStorage.getItem('theme') === 'light') {
+        document.body.classList.add('light-mode');
+    }
+
     setupEventListeners();
     createNewSession();
     loadCourseStats();
@@ -33,6 +39,13 @@ function setupEventListeners() {
     
     // New chat button
     newChatBtn.addEventListener('click', startNewChat);
+
+    // Theme toggle
+    themeToggle.addEventListener('click', () => {
+        const isLight = document.body.classList.toggle('light-mode');
+        localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        themeToggle.setAttribute('aria-label', isLight ? 'Switch to dark mode' : 'Switch to light mode');
+    });
 
     // Suggested questions
     document.querySelectorAll('.suggested-item').forEach(button => {
