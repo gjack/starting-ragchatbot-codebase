@@ -19,10 +19,11 @@ class Tool(ABC):
 
 class CourseSearchTool(Tool):
     """Tool for searching course content with semantic course name matching"""
-    
+
     def __init__(self, vector_store: VectorStore):
         self.store = vector_store
         self.last_sources = []  # Track sources from last search
+        self.last_source_links = []  # Track source links from last search
     
     def get_tool_definition(self) -> Dict[str, Any]:
         """Return Anthropic tool definition for this tool"""
@@ -71,10 +72,14 @@ class CourseSearchTool(Tool):
         
         # Handle errors
         if results.error:
+            self.last_sources = []
+            self.last_source_links = []
             return results.error
-        
+
         # Handle empty results
         if results.is_empty():
+            self.last_sources = []
+            self.last_source_links = []
             filter_info = ""
             if course_name:
                 filter_info += f" in course '{course_name}'"
@@ -88,30 +93,79 @@ class CourseSearchTool(Tool):
     def _format_results(self, results: SearchResults) -> str:
         """Format search results with course and lesson context"""
         formatted = []
-        sources = []  # Track sources for the UI
-        
+        sources = []
+        source_links = []
+
         for doc, meta in zip(results.documents, results.metadata):
             course_title = meta.get('course_title', 'unknown')
             lesson_num = meta.get('lesson_number')
-            
+
             # Build context header
             header = f"[{course_title}"
             if lesson_num is not None:
                 header += f" - Lesson {lesson_num}"
             header += "]"
-            
-            # Track source for the UI
+
+            # Track source label and link for the UI
             source = course_title
             if lesson_num is not None:
                 source += f" - Lesson {lesson_num}"
+                link = self.store.get_lesson_link(course_title, lesson_num)
+            else:
+                link = self.store.get_course_link(course_title)
             sources.append(source)
-            
+            source_links.append(link)
+
             formatted.append(f"{header}\n{doc}")
-        
-        # Store sources for retrieval
+
         self.last_sources = sources
-        
+        self.last_source_links = source_links
+
         return "\n\n".join(formatted)
+
+class CourseOutlineTool(Tool):
+    """Tool for retrieving a course outline (title, link, and lesson list)"""
+
+    def __init__(self, vector_store: VectorStore):
+        self.store = vector_store
+        self.last_sources = []
+        self.last_source_links = []
+
+    def get_tool_definition(self) -> Dict[str, Any]:
+        return {
+            "name": "get_course_outline",
+            "description": "Retrieve the full outline of a course: its title, link, and list of all lessons with their numbers and titles",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "course_title": {
+                        "type": "string",
+                        "description": "Course title to look up (partial matches work, e.g. 'MCP', 'Introduction')"
+                    }
+                },
+                "required": ["course_title"]
+            }
+        }
+
+    def execute(self, course_title: str) -> str:
+        outline = self.store.get_course_outline(course_title)
+        if not outline:
+            return f"No course found matching '{course_title}'."
+
+        self.last_sources = [outline["title"]]
+        self.last_source_links = [outline["course_link"]]
+
+        lines = [
+            f"Course: {outline['title']}",
+            f"Link: {outline['course_link']}",
+            "",
+            "Lessons:",
+        ]
+        for lesson in outline["lessons"]:
+            lines.append(f"  Lesson {lesson['lesson_number']}: {lesson['lesson_title']}")
+
+        return "\n".join(lines)
+
 
 class ToolManager:
     """Manages available tools for the AI"""
@@ -141,10 +195,16 @@ class ToolManager:
     
     def get_last_sources(self) -> list:
         """Get sources from the last search operation"""
-        # Check all tools for last_sources attribute
         for tool in self.tools.values():
             if hasattr(tool, 'last_sources') and tool.last_sources:
                 return tool.last_sources
+        return []
+
+    def get_last_source_links(self) -> list:
+        """Get source links from the last search operation"""
+        for tool in self.tools.values():
+            if hasattr(tool, 'last_source_links') and tool.last_source_links:
+                return tool.last_source_links
         return []
 
     def reset_sources(self):
@@ -152,3 +212,5 @@ class ToolManager:
         for tool in self.tools.values():
             if hasattr(tool, 'last_sources'):
                 tool.last_sources = []
+            if hasattr(tool, 'last_source_links'):
+                tool.last_source_links = []

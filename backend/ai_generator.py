@@ -8,10 +8,12 @@ class AIGenerator:
     SYSTEM_PROMPT = """ You are an AI assistant specialized in course materials and educational content with access to a comprehensive search tool for course information.
 
 Search Tool Usage:
-- Use the search tool **only** for questions about specific course content or detailed educational materials
-- **One search per query maximum**
-- Synthesize search results into accurate, fact-based responses
-- If search yields no results, state this clearly without offering alternatives
+- Use **get_course_outline** for questions about course structure, lesson lists, or outlines (e.g. "What lessons are in X?", "Show me the outline of X", "How many lessons does X have?")
+  - Return the course title, course link, and all lesson numbers and titles
+- Use **search_course_content** for questions about specific topics or content within a course
+- **Maximum 2 sequential tool calls per query** — use a second call only when the first result is needed to form the second query (e.g. look up a lesson title, then search for related content)
+- Synthesize tool results into accurate, fact-based responses
+- If a tool yields no results, state this clearly without offering alternatives
 
 Response Protocol:
 - **General knowledge questions**: Answer using existing knowledge without searching
@@ -81,55 +83,68 @@ Provide only the direct answer to what was asked.
         
         # Handle tool execution if needed
         if response.stop_reason == "tool_use" and tool_manager:
-            return self._handle_tool_execution(response, api_params, tool_manager)
-        
+            return self._handle_tool_loop(response, api_params, tool_manager, tools)
+
         # Return direct response
         return response.content[0].text
-    
-    def _handle_tool_execution(self, initial_response, base_params: Dict[str, Any], tool_manager):
+
+    def _handle_tool_loop(self, initial_response, base_params: Dict[str, Any],
+                          tool_manager, tools, max_rounds: int = 2) -> str:
         """
-        Handle execution of tool calls and get follow-up response.
-        
-        Args:
-            initial_response: The response containing tool use requests
-            base_params: Base API parameters
-            tool_manager: Manager to execute tools
-            
-        Returns:
-            Final response text after tool execution
+        Execute up to max_rounds of tool-use before synthesizing a final answer.
+
+        After each tool round the between-round call still offers tools (tool_choice:
+        auto) so Claude can request a second lookup.  The final synthesis call uses
+        self.base_params (no tools) to guarantee Claude produces text.
         """
-        # Start with existing messages
-        messages = base_params["messages"].copy()
-        
-        # Add AI's tool use response
-        messages.append({"role": "assistant", "content": initial_response.content})
-        
-        # Execute all tool calls and collect results
-        tool_results = []
-        for content_block in initial_response.content:
-            if content_block.type == "tool_use":
-                tool_result = tool_manager.execute_tool(
-                    content_block.name, 
-                    **content_block.input
-                )
-                
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": content_block.id,
-                    "content": tool_result
-                })
-        
-        # Add tool results as single message
-        if tool_results:
+        messages = list(base_params["messages"])
+        current_response = initial_response
+
+        for round_num in range(max_rounds):
+            # Append assistant's tool-use turn
+            messages.append({"role": "assistant", "content": current_response.content})
+
+            # Execute every tool block in this round
+            tool_results = []
+            terminated_early = False
+            for content_block in current_response.content:
+                if content_block.type == "tool_use":
+                    try:
+                        result = tool_manager.execute_tool(
+                            content_block.name, **content_block.input
+                        )
+                    except Exception as e:
+                        result = f"Tool execution error: {e}"
+                        terminated_early = True
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": content_block.id,
+                        "content": result,
+                    })
+                    if terminated_early:
+                        break
+
             messages.append({"role": "user", "content": tool_results})
-        
-        # Prepare final API call without tools
-        final_params = {
+
+            if terminated_early:
+                break
+
+            # Between rounds: offer tools again so Claude can chain a second lookup
+            if round_num < max_rounds - 1:
+                between_params = {k: v for k, v in base_params.items() if k != "messages"}
+                next_response = self.client.messages.create(**between_params, messages=messages)
+                if next_response.stop_reason != "tool_use":
+                    # Claude synthesized directly — return without an extra call
+                    return next_response.content[0].text
+                current_response = next_response
+
+        return self._synthesize(messages, base_params["system"])
+
+    def _synthesize(self, messages: list, system: str) -> str:
+        """Make a final synthesis call with no tools so Claude must produce text."""
+        final = self.client.messages.create(
             **self.base_params,
-            "messages": messages,
-            "system": base_params["system"]
-        }
-        
-        # Get final response
-        final_response = self.client.messages.create(**final_params)
-        return final_response.content[0].text
+            messages=messages,
+            system=system,
+        )
+        return final.content[0].text
