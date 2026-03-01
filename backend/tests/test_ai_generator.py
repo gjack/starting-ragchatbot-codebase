@@ -4,9 +4,11 @@ Tests for AIGenerator in ai_generator.py.
 Validates the two-turn tool-use loop: initial call → tool execution → final synthesis.
 All Anthropic API calls are mocked so no real API key is needed.
 """
+
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from unittest.mock import MagicMock, patch, call
@@ -14,10 +16,10 @@ from unittest.mock import MagicMock, patch, call
 import ai_generator as ai_module
 from ai_generator import AIGenerator
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
 
 def make_generator() -> AIGenerator:
     """Return an AIGenerator with a mocked Anthropic client."""
@@ -53,6 +55,7 @@ def mock_response(stop_reason: str, content: list) -> MagicMock:
 # Direct (no-tool) response path
 # ---------------------------------------------------------------------------
 
+
 class TestDirectResponse:
 
     def test_returns_text_when_stop_reason_is_end_turn(self):
@@ -60,7 +63,7 @@ class TestDirectResponse:
         gen = make_generator()
         gen.client.messages.create.return_value = mock_response(
             stop_reason="end_turn",
-            content=[text_block("Paris is the capital of France.")]
+            content=[text_block("Paris is the capital of France.")],
         )
 
         result = gen.generate_response(query="What is the capital of France?")
@@ -71,8 +74,7 @@ class TestDirectResponse:
         """tool_manager.execute_tool() is NOT called when stop_reason is end_turn."""
         gen = make_generator()
         gen.client.messages.create.return_value = mock_response(
-            stop_reason="end_turn",
-            content=[text_block("Some answer")]
+            stop_reason="end_turn", content=[text_block("Some answer")]
         )
         mock_tool_manager = MagicMock()
 
@@ -84,8 +86,7 @@ class TestDirectResponse:
         """Only a single Claude API call is made when no tool is used."""
         gen = make_generator()
         gen.client.messages.create.return_value = mock_response(
-            stop_reason="end_turn",
-            content=[text_block("Answer")]
+            stop_reason="end_turn", content=[text_block("Answer")]
         )
 
         gen.generate_response(query="Simple question")
@@ -97,18 +98,23 @@ class TestDirectResponse:
 # Tool-use path
 # ---------------------------------------------------------------------------
 
+
 class TestToolUsePath:
 
-    def _setup_two_turn(self, gen: AIGenerator, tool_name: str, tool_inputs: dict,
-                        tool_result: str, final_answer: str):
+    def _setup_two_turn(
+        self,
+        gen: AIGenerator,
+        tool_name: str,
+        tool_inputs: dict,
+        tool_result: str,
+        final_answer: str,
+    ):
         """Configure the mocked client for a two-turn tool-use exchange."""
         first_response = mock_response(
-            stop_reason="tool_use",
-            content=[tool_use_block(tool_name, tool_inputs)]
+            stop_reason="tool_use", content=[tool_use_block(tool_name, tool_inputs)]
         )
         second_response = mock_response(
-            stop_reason="end_turn",
-            content=[text_block(final_answer)]
+            stop_reason="end_turn", content=[text_block(final_answer)]
         )
         gen.client.messages.create.side_effect = [first_response, second_response]
         return first_response
@@ -124,18 +130,17 @@ class TestToolUsePath:
             tool_name="search_course_content",
             tool_inputs={"query": "python decorators"},
             tool_result="Search result content",
-            final_answer="Decorators are..."
+            final_answer="Decorators are...",
         )
 
         gen.generate_response(
             query="What are python decorators?",
             tools=[{"name": "search_course_content"}],
-            tool_manager=mock_tool_manager
+            tool_manager=mock_tool_manager,
         )
 
         mock_tool_manager.execute_tool.assert_called_once_with(
-            "search_course_content",
-            query="python decorators"
+            "search_course_content", query="python decorators"
         )
 
     def test_tool_use_makes_two_api_calls(self):
@@ -151,7 +156,7 @@ class TestToolUsePath:
         gen.generate_response(
             query="Content question",
             tools=[{"name": "search_course_content"}],
-            tool_manager=mock_tool_manager
+            tool_manager=mock_tool_manager,
         )
 
         assert gen.client.messages.create.call_count == 2
@@ -163,14 +168,17 @@ class TestToolUsePath:
         mock_tool_manager.execute_tool.return_value = "search results"
 
         self._setup_two_turn(
-            gen, "search_course_content", {"query": "topic"},
-            "search results", "Here is the synthesized answer."
+            gen,
+            "search_course_content",
+            {"query": "topic"},
+            "search results",
+            "Here is the synthesized answer.",
         )
 
         result = gen.generate_response(
             query="Content question",
             tools=[{"name": "search_course_content"}],
-            tool_manager=mock_tool_manager
+            tool_manager=mock_tool_manager,
         )
 
         assert result == "Here is the synthesized answer."
@@ -182,14 +190,17 @@ class TestToolUsePath:
         mock_tool_manager.execute_tool.return_value = "Retrieved content here"
 
         self._setup_two_turn(
-            gen, "search_course_content", {"query": "topic"},
-            "Retrieved content here", "Final answer"
+            gen,
+            "search_course_content",
+            {"query": "topic"},
+            "Retrieved content here",
+            "Final answer",
         )
 
         gen.generate_response(
             query="Content question",
             tools=[{"name": "search_course_content"}],
-            tool_manager=mock_tool_manager
+            tool_manager=mock_tool_manager,
         )
 
         second_call_kwargs = gen.client.messages.create.call_args_list[1].kwargs
@@ -203,9 +214,9 @@ class TestToolUsePath:
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "tool_result":
                         tool_result_found = True
-                        assert block["content"] == "Retrieved content here", (
-                            f"tool_result content mismatch: {block['content']}"
-                        )
+                        assert (
+                            block["content"] == "Retrieved content here"
+                        ), f"tool_result content mismatch: {block['content']}"
         assert tool_result_found, (
             "No tool_result block found in the second API call's messages. "
             "Tool results must be passed back to Claude to synthesize a response."
@@ -220,18 +231,21 @@ class TestToolUsePath:
         # Use a specific tool_use_id so we can verify it
         first_response = mock_response(
             stop_reason="tool_use",
-            content=[tool_use_block("search_course_content", {"query": "x"}, tool_id="toolu_abc123")]
+            content=[
+                tool_use_block(
+                    "search_course_content", {"query": "x"}, tool_id="toolu_abc123"
+                )
+            ],
         )
         second_response = mock_response(
-            stop_reason="end_turn",
-            content=[text_block("Answer")]
+            stop_reason="end_turn", content=[text_block("Answer")]
         )
         gen.client.messages.create.side_effect = [first_response, second_response]
 
         gen.generate_response(
             query="question",
             tools=[{"name": "search_course_content"}],
-            tool_manager=mock_tool_manager
+            tool_manager=mock_tool_manager,
         )
 
         second_call_kwargs = gen.client.messages.create.call_args_list[1].kwargs
@@ -245,7 +259,9 @@ class TestToolUsePath:
                     if isinstance(block, dict) and block.get("type") == "tool_result":
                         assert block.get("tool_use_id") == "toolu_abc123"
                         tool_use_id_found = True
-        assert tool_use_id_found, "tool_result block with tool_use_id not found in second call messages"
+        assert (
+            tool_use_id_found
+        ), "tool_result block with tool_use_id not found in second call messages"
 
     def test_assistant_tool_use_block_included_in_second_call_messages(self):
         """Second call messages include the assistant's original tool_use response."""
@@ -255,39 +271,37 @@ class TestToolUsePath:
 
         first_response = mock_response(
             stop_reason="tool_use",
-            content=[tool_use_block("search_course_content", {"query": "topic"})]
+            content=[tool_use_block("search_course_content", {"query": "topic"})],
         )
         second_response = mock_response(
-            stop_reason="end_turn",
-            content=[text_block("Answer")]
+            stop_reason="end_turn", content=[text_block("Answer")]
         )
         gen.client.messages.create.side_effect = [first_response, second_response]
 
         gen.generate_response(
             query="question",
             tools=[{"name": "search_course_content"}],
-            tool_manager=mock_tool_manager
+            tool_manager=mock_tool_manager,
         )
 
         second_call_kwargs = gen.client.messages.create.call_args_list[1].kwargs
         messages = second_call_kwargs["messages"]
 
         assistant_messages = [m for m in messages if m.get("role") == "assistant"]
-        assert len(assistant_messages) >= 1, (
-            "Second API call must include the assistant's tool_use turn in messages."
-        )
+        assert (
+            len(assistant_messages) >= 1
+        ), "Second API call must include the assistant's tool_use turn in messages."
 
     def test_conversation_history_included_in_system_prompt(self):
         """Conversation history is appended to the system prompt when provided."""
         gen = make_generator()
         gen.client.messages.create.return_value = mock_response(
-            stop_reason="end_turn",
-            content=[text_block("Answer")]
+            stop_reason="end_turn", content=[text_block("Answer")]
         )
 
         gen.generate_response(
             query="Follow-up question",
-            conversation_history="User: Hello\nAssistant: Hi there"
+            conversation_history="User: Hello\nAssistant: Hi there",
         )
 
         call_kwargs = gen.client.messages.create.call_args.kwargs
@@ -299,8 +313,7 @@ class TestToolUsePath:
         """Tool definitions are passed to the first Claude API call."""
         gen = make_generator()
         gen.client.messages.create.return_value = mock_response(
-            stop_reason="end_turn",
-            content=[text_block("Answer")]
+            stop_reason="end_turn", content=[text_block("Answer")]
         )
         tool_defs = [{"name": "search_course_content", "input_schema": {}}]
 
@@ -314,13 +327,11 @@ class TestToolUsePath:
         """tool_choice is set to auto when tools are provided."""
         gen = make_generator()
         gen.client.messages.create.return_value = mock_response(
-            stop_reason="end_turn",
-            content=[text_block("Answer")]
+            stop_reason="end_turn", content=[text_block("Answer")]
         )
 
         gen.generate_response(
-            query="question",
-            tools=[{"name": "search_course_content"}]
+            query="question", tools=[{"name": "search_course_content"}]
         )
 
         call_kwargs = gen.client.messages.create.call_args.kwargs
@@ -331,21 +342,31 @@ class TestToolUsePath:
 # Two-round tool-use path
 # ---------------------------------------------------------------------------
 
+
 class TestTwoRoundToolUse:
     """Tests for the sequential tool loop (up to 2 rounds before synthesis)."""
 
-    def _setup_three_turn(self, gen: AIGenerator,
-                          tool_a_name: str, tool_a_inputs: dict,
-                          tool_b_name: str, tool_b_inputs: dict,
-                          final_answer: str):
+    def _setup_three_turn(
+        self,
+        gen: AIGenerator,
+        tool_a_name: str,
+        tool_a_inputs: dict,
+        tool_b_name: str,
+        tool_b_inputs: dict,
+        final_answer: str,
+    ):
         """
         Configure the mocked client for a two-round tool-use exchange:
           call 1 → tool_use (tool A)
           call 2 → tool_use (tool B)   [between-round, tools still offered]
           call 3 → end_turn            [synthesis, no tools]
         """
-        call1 = mock_response("tool_use", [tool_use_block(tool_a_name, tool_a_inputs, "id_A")])
-        call2 = mock_response("tool_use", [tool_use_block(tool_b_name, tool_b_inputs, "id_B")])
+        call1 = mock_response(
+            "tool_use", [tool_use_block(tool_a_name, tool_a_inputs, "id_A")]
+        )
+        call2 = mock_response(
+            "tool_use", [tool_use_block(tool_b_name, tool_b_inputs, "id_B")]
+        )
         call3 = mock_response("end_turn", [text_block(final_answer)])
         gen.client.messages.create.side_effect = [call1, call2, call3]
 
@@ -357,8 +378,10 @@ class TestTwoRoundToolUse:
 
         self._setup_three_turn(
             gen,
-            "get_course_outline", {"course_name": "Python 101"},
-            "search_course_content", {"query": "lesson 3 title"},
+            "get_course_outline",
+            {"course_name": "Python 101"},
+            "search_course_content",
+            {"query": "lesson 3 title"},
             "Final synthesized answer",
         )
 
@@ -378,8 +401,10 @@ class TestTwoRoundToolUse:
 
         self._setup_three_turn(
             gen,
-            "get_course_outline", {"course_name": "Python 101"},
-            "search_course_content", {"query": "lesson 3 title"},
+            "get_course_outline",
+            {"course_name": "Python 101"},
+            "search_course_content",
+            {"query": "lesson 3 title"},
             "Final synthesized answer",
         )
 
@@ -405,8 +430,10 @@ class TestTwoRoundToolUse:
 
         self._setup_three_turn(
             gen,
-            "get_course_outline", {"course_name": "Python 101"},
-            "search_course_content", {"query": "lesson 3 title"},
+            "get_course_outline",
+            {"course_name": "Python 101"},
+            "search_course_content",
+            {"query": "lesson 3 title"},
             "Final synthesized answer",
         )
 
@@ -417,9 +444,9 @@ class TestTwoRoundToolUse:
         )
 
         third_call_kwargs = gen.client.messages.create.call_args_list[2].kwargs
-        assert "tools" not in third_call_kwargs, (
-            "Synthesis call (index 2) must not include 'tools' so Claude produces text."
-        )
+        assert (
+            "tools" not in third_call_kwargs
+        ), "Synthesis call (index 2) must not include 'tools' so Claude produces text."
 
     def test_two_rounds_returns_synthesis_text(self):
         """generate_response() returns the text from the synthesis call."""
@@ -429,8 +456,10 @@ class TestTwoRoundToolUse:
 
         self._setup_three_turn(
             gen,
-            "get_course_outline", {"course_name": "Python 101"},
-            "search_course_content", {"query": "lesson 3 title"},
+            "get_course_outline",
+            {"course_name": "Python 101"},
+            "search_course_content",
+            {"query": "lesson 3 title"},
             "Final synthesized answer",
         )
 
@@ -450,7 +479,7 @@ class TestTwoRoundToolUse:
 
         call1 = mock_response(
             "tool_use",
-            [tool_use_block("search_course_content", {"query": "topic"}, "id_err")]
+            [tool_use_block("search_course_content", {"query": "topic"}, "id_err")],
         )
         call2 = mock_response("end_turn", [text_block("Synthesized despite error")])
         gen.client.messages.create.side_effect = [call1, call2]

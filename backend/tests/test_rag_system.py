@@ -5,17 +5,19 @@ Patches all heavy dependencies (ChromaDB, Anthropic) so tests run without
 real infrastructure. Validates the orchestration logic: tools are passed to
 the AI, history is saved, sources are collected and reset.
 """
+
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from unittest.mock import MagicMock, patch, call
 
-
 # ---------------------------------------------------------------------------
 # Helper: build a RAGSystem with every external dependency mocked
 # ---------------------------------------------------------------------------
+
 
 def make_rag():
     """
@@ -23,10 +25,12 @@ def make_rag():
     and SessionManager all replaced by MagicMocks.
     Returns (rag, mocks_dict).
     """
-    with patch("rag_system.VectorStore") as mock_vs_cls, \
-         patch("rag_system.AIGenerator") as mock_ai_cls, \
-         patch("rag_system.DocumentProcessor") as mock_dp_cls, \
-         patch("rag_system.SessionManager") as mock_sm_cls:
+    with (
+        patch("rag_system.VectorStore") as mock_vs_cls,
+        patch("rag_system.AIGenerator") as mock_ai_cls,
+        patch("rag_system.DocumentProcessor") as mock_dp_cls,
+        patch("rag_system.SessionManager") as mock_sm_cls,
+    ):
 
         from rag_system import RAGSystem
 
@@ -56,6 +60,7 @@ def make_rag():
 # Basic return-value shape
 # ---------------------------------------------------------------------------
 
+
 class TestRAGSystemQueryReturnShape:
 
     def test_query_returns_three_element_tuple(self):
@@ -75,7 +80,9 @@ class TestRAGSystemQueryReturnShape:
     def test_query_first_element_is_ai_response(self):
         """The first element of the tuple is the string returned by AIGenerator."""
         rag, mocks = make_rag()
-        mocks["ai_generator"].generate_response.return_value = "Detailed answer about RAG"
+        mocks["ai_generator"].generate_response.return_value = (
+            "Detailed answer about RAG"
+        )
         mocks["session_manager"].get_conversation_history.return_value = None
 
         answer, _, _ = rag.query("Explain RAG")
@@ -97,6 +104,7 @@ class TestRAGSystemQueryReturnShape:
 # ---------------------------------------------------------------------------
 # Tool passing
 # ---------------------------------------------------------------------------
+
 
 class TestRAGSystemToolUsage:
 
@@ -123,9 +131,9 @@ class TestRAGSystemToolUsage:
 
         call_kwargs = mocks["ai_generator"].generate_response.call_args.kwargs
         tool_manager = call_kwargs.get("tool_manager")
-        assert tool_manager is not None, (
-            "generate_response() must receive 'tool_manager' so it can execute tool calls"
-        )
+        assert (
+            tool_manager is not None
+        ), "generate_response() must receive 'tool_manager' so it can execute tool calls"
         assert tool_manager is rag.tool_manager
 
     def test_tool_definitions_include_search_course_content(self):
@@ -138,14 +146,15 @@ class TestRAGSystemToolUsage:
 
         call_kwargs = mocks["ai_generator"].generate_response.call_args.kwargs
         tool_names = [t["name"] for t in call_kwargs["tools"]]
-        assert "search_course_content" in tool_names, (
-            f"'search_course_content' must be in the tools list; got {tool_names}"
-        )
+        assert (
+            "search_course_content" in tool_names
+        ), f"'search_course_content' must be in the tools list; got {tool_names}"
 
 
 # ---------------------------------------------------------------------------
 # Session / history management
 # ---------------------------------------------------------------------------
+
 
 class TestRAGSystemSessionHandling:
 
@@ -153,11 +162,15 @@ class TestRAGSystemSessionHandling:
         """get_conversation_history() is called when a session_id is given."""
         rag, mocks = make_rag()
         mocks["ai_generator"].generate_response.return_value = "Answer"
-        mocks["session_manager"].get_conversation_history.return_value = "User: hi\nAssistant: hello"
+        mocks["session_manager"].get_conversation_history.return_value = (
+            "User: hi\nAssistant: hello"
+        )
 
         rag.query("follow up", session_id="session_1")
 
-        mocks["session_manager"].get_conversation_history.assert_called_once_with("session_1")
+        mocks["session_manager"].get_conversation_history.assert_called_once_with(
+            "session_1"
+        )
 
     def test_query_skips_history_when_no_session(self):
         """get_conversation_history() is NOT called when session_id is None."""
@@ -179,7 +192,7 @@ class TestRAGSystemSessionHandling:
         mocks["session_manager"].add_exchange.assert_called_once()
         args = mocks["session_manager"].add_exchange.call_args.args
         assert args[0] == "session_42"
-        assert "RAG" in args[1]       # original user query
+        assert "RAG" in args[1]  # original user query
         assert args[2] == "The answer"  # AI response
 
     def test_query_does_not_save_history_without_session(self):
@@ -196,6 +209,7 @@ class TestRAGSystemSessionHandling:
 # Source collection and reset
 # ---------------------------------------------------------------------------
 
+
 class TestRAGSystemSourceHandling:
 
     def test_sources_are_collected_from_tool_manager(self):
@@ -205,8 +219,12 @@ class TestRAGSystemSourceHandling:
         mocks["session_manager"].get_conversation_history.return_value = None
 
         # Inject sources into the real tool_manager via patching
-        rag.tool_manager.get_last_sources = MagicMock(return_value=["Course A - Lesson 1"])
-        rag.tool_manager.get_last_source_links = MagicMock(return_value=["https://example.com"])
+        rag.tool_manager.get_last_sources = MagicMock(
+            return_value=["Course A - Lesson 1"]
+        )
+        rag.tool_manager.get_last_source_links = MagicMock(
+            return_value=["https://example.com"]
+        )
         rag.tool_manager.reset_sources = MagicMock()
 
         _, sources, links = rag.query("content question", session_id=None)
@@ -233,6 +251,7 @@ class TestRAGSystemSourceHandling:
 # Error propagation (causes HTTP 500 in app.py)
 # ---------------------------------------------------------------------------
 
+
 class TestRAGSystemErrorPropagation:
 
     def test_exception_from_ai_generator_propagates(self):
@@ -241,7 +260,9 @@ class TestRAGSystemErrorPropagation:
         app.py catches it and returns HTTP 500, which the frontend shows as 'Query failed'.
         """
         rag, mocks = make_rag()
-        mocks["ai_generator"].generate_response.side_effect = RuntimeError("API failure")
+        mocks["ai_generator"].generate_response.side_effect = RuntimeError(
+            "API failure"
+        )
         mocks["session_manager"].get_conversation_history.return_value = None
 
         with pytest.raises(RuntimeError, match="API failure"):
@@ -250,7 +271,9 @@ class TestRAGSystemErrorPropagation:
     def test_exception_not_swallowed_silently(self):
         """query() must not catch exceptions and return a default string."""
         rag, mocks = make_rag()
-        mocks["ai_generator"].generate_response.side_effect = ValueError("bad model name")
+        mocks["ai_generator"].generate_response.side_effect = ValueError(
+            "bad model name"
+        )
         mocks["session_manager"].get_conversation_history.return_value = None
 
         with pytest.raises(ValueError):
@@ -260,6 +283,7 @@ class TestRAGSystemErrorPropagation:
 # ---------------------------------------------------------------------------
 # get_course_analytics — regression test for missing method
 # ---------------------------------------------------------------------------
+
 
 class TestRAGSystemCourseAnalytics:
 
@@ -279,7 +303,8 @@ class TestRAGSystemCourseAnalytics:
 
         mocks["vector_store"].get_course_count.return_value = 2
         mocks["vector_store"].get_existing_course_titles.return_value = [
-            "Intro to Python", "Advanced RAG"
+            "Intro to Python",
+            "Advanced RAG",
         ]
 
         result = rag.get_course_analytics()
